@@ -137,7 +137,14 @@ def main():
 
     # qwen via vllm
     qwen_tok = AutoTokenizer.from_pretrained(QWEN_DIR, trust_remote_code=True)
-    llm = LLM(model=QWEN_DIR, trust_remote_code=True, model_impl="transformers", gpu_memory_utilization=0.80,)
+
+    llm = LLM(
+        model=QWEN_DIR, 
+        trust_remote_code=True, 
+        model_impl="transformers",
+        runner='generate', 
+        gpu_memory_utilization=0.80
+    )
     
     sp = SamplingParams(max_tokens=MAX_TOKENS, temperature=TEMPERATURE, top_p=TOP_P)
 

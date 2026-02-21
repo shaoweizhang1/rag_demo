@@ -5,8 +5,8 @@ from tqdm import tqdm
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
 
-MODEL_DIR = "models/Qwen2.5_3B_Instruct"
-QUERIES_PATH = Path("data/queries.jsonl")
+MODEL_DIR = "/root/autodl-tmp/models/Qwen2.5_3B_Instruct"
+QUERIES_PATH = Path("/root/autodl-tmp/data/queries.jsonl")
 OUT_PATH = Path("result/qwen2.5.jsonl")
 
 MAX_TOKENS = 256
