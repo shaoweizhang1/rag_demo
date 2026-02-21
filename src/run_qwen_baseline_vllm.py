@@ -12,6 +12,7 @@ OUT_PATH = Path("result/qwen2.5.jsonl")
 MAX_TOKENS = 256
 TEMPERATURE = 0.2
 TOP_P = 0.9
+BATCH = 64
 
 def read_jsonl(p: Path):
     with p.open("r", encoding="utf-8") as f:
@@ -28,6 +29,8 @@ def main():
     llm = LLM(
         model=MODEL_DIR,
         trust_remote_code=True,
+        model_impl='transformers',
+        runner='generate'
     )
 
     sp = SamplingParams(
@@ -35,30 +38,33 @@ def main():
         temperature=TEMPERATURE,
         top_p=TOP_P,
     )
-
+    
+    rows = list(read_jsonl(QUERIES_PATH))
+    
     with OUT_PATH.open("w", encoding="utf-8") as out_f:
-        for x in tqdm(list(read_jsonl(QUERIES_PATH)), desc="vllm baseline"):
-            qid = x.get("_id") or x.get("id") or x.get("query_id")
-            query = (x.get("text") or x.get("query") or "").strip()
-            if not query:
-                continue
+        for i in tqdm(range(0, len(rows), BATCH), desc="qwen baseline"):
+            batch = rows[i:i+BATCH]
 
-            messages = [
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": query},
-            ]
+            qids = []
+            queries = []
+            prompts = []
+            for x in batch:
+                qid = x.get("_id") or x.get("id") or x.get("query_id")
+                query = (x.get("text") or x.get("query") or "").strip()
+                if not query:
+                    continue
+                qids.append(qid)
+                queries.append(query)
+                messages = [
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": query},
+                ]
+                prompts.append(tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True))
 
-            prompt = tok.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True,
-            )
-
-            out = llm.generate([prompt], sp)[0]
-            answer = out.outputs[0].text.strip()
-
-            out_f.write(json.dumps({"qid": qid, "query": query, "answer": answer}, ensure_ascii=False) + "\n")
-            out_f.flush()
+            outs = llm.generate(prompts, sp, use_tqdm=False)
+            for qid, query, o in zip(qids, queries, outs):
+                ans = o.outputs[0].text.strip()
+                out_f.write(json.dumps({"qid": qid, "query": query, "answer": ans}, ensure_ascii=False) + "\n")
 
     print("saved to", OUT_PATH)
 

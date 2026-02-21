@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import math
 
 import torch
 import faiss
@@ -31,6 +32,7 @@ RERANK_BS = 16
 MAX_TOKENS = 256
 TEMPERATURE = 0.2
 TOP_P = 0.9
+BATCH = 32
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -135,53 +137,72 @@ def main():
 
     # qwen via vllm
     qwen_tok = AutoTokenizer.from_pretrained(QWEN_DIR, trust_remote_code=True)
-    llm = LLM(model=QWEN_DIR, trust_remote_code=True)
+    llm = LLM(model=QWEN_DIR, trust_remote_code=True, model_impl="transformers", gpu_memory_utilization=0.80,)
+    
     sp = SamplingParams(max_tokens=MAX_TOKENS, temperature=TEMPERATURE, top_p=TOP_P)
 
+    rows = list(read_jsonl(QUERIES_PATH))
+    total_batches = math.ceil(len(rows) / BATCH)
+
     with OUT_PATH.open("w", encoding="utf-8") as out_f:
-        for x in tqdm(list(read_jsonl(QUERIES_PATH)), desc="rag+rerank vllm"):
-            qid = x.get("_id") or x.get("id") or x.get("query_id")
-            query = (x.get("text") or x.get("query") or "").strip()
-            if not query:
+        for bi in tqdm(range(total_batches), desc="rag+rerank vllm"):
+            batch_rows = rows[bi * BATCH : (bi + 1) * BATCH]
+
+            prompts = []
+            metas = []
+
+            for x in batch_rows:
+                qid = x.get("_id") or x.get("id") or x.get("query_id")
+                query = (x.get("text") or x.get("query") or "").strip()
+                if not query:
+                    continue
+
+                # 1) retrieve
+                qvec = embed_query(emb_model, emb_tok, query)
+                _, idxs = index.search(qvec, TOP_K)
+                hit_indices = idxs[0].tolist()
+
+                # 2) rerank
+                cand_texts = [(docstore[i].get("text") or "").strip() if i >= 0 else "" for i in hit_indices]
+                order, _ = rerank(rerank_model, rerank_tok, query, cand_texts, RERANK_BS)
+                reranked = [hit_indices[j] for j in order if hit_indices[j] >= 0][:CTX_K]
+
+                # 3) build ctx
+                ctx_ids, ctx = build_context(docstore, reranked, ctx_k=CTX_K)
+
+                # 4) build prompt
+                messages = [
+                    {
+                        "role": "system",
+                        "content": "You are a helpful assistant. Answer using the given context. If the context is insufficient, say you don't know.",
+                    },
+                    {"role": "user", "content": f"Context:\n{ctx}\n\nQuestion:\n{query}"},
+                ]
+                prompt = qwen_tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+                prompts.append(prompt)
+                metas.append({"qid": qid, "query": query, "ctx_ids": ctx_ids, "ctx": ctx})
+
+            if not prompts:
                 continue
 
-            qvec = embed_query(emb_model, emb_tok, query)
-            _, idxs = index.search(qvec, TOP_K)
-            hit_indices = idxs[0].tolist()
+            outs = llm.generate(prompts, sp, use_tqdm=False)
 
-            cand_texts = []
-            for i in hit_indices:
-                if i < 0:
-                    cand_texts.append("")
-                else:
-                    cand_texts.append((docstore[i].get("text") or "").strip())
-
-            order, _ = rerank(rerank_model, rerank_tok, query, cand_texts, RERANK_BS)
-            reranked = [hit_indices[j] for j in order if hit_indices[j] >= 0]
-            reranked = reranked[:CTX_K]
-
-            ctx_ids, ctx = build_context(docstore, reranked, ctx_k=CTX_K)
-
-            messages = [
-                {
-                    "role": "system",
-                    "content": "You are a helpful assistant. Answer using the given context. If the context is insufficient, say you don't know.",
-                },
-                {"role": "user", "content": f"Context:\n{ctx}\n\nQuestion:\n{query}"},
-            ]
-            prompt = qwen_tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-
-            out = llm.generate([prompt], sp)[0]
-            answer = out.outputs[0].text.strip()
-
-            out_f.write(
-                json.dumps(
-                    {"qid": qid, "query": query, "answer": answer, "ctx_ids": ctx_ids, "ctx": ctx},
-                    ensure_ascii=False,
+            for meta, out in zip(metas, outs):
+                answer = out.outputs[0].text.strip()
+                out_f.write(
+                    json.dumps(
+                        {
+                            "qid": meta["qid"],
+                            "query": meta["query"],
+                            "answer": answer,
+                            "ctx_ids": meta["ctx_ids"],
+                            "ctx": meta["ctx"],
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
                 )
-                + "\n"
-            )
-            out_f.flush()
 
     print("saved to", OUT_PATH)
 
