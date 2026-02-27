@@ -137,18 +137,20 @@ Computes NDCG@1/5/10, Recall@1/5/10, and MRR against NFCorpus qrels. Reports sco
 
 ## Results
 
-*To be updated after running eval_retrieval.py on the server.*
+Evaluated on NFCorpus test set (323 queries with qrels). FAISS retrieves top-20 candidates; reranker selects top-4 for generation.
 
-| Metric | FAISS only | FAISS + Rerank |
-|--------|-----------|----------------|
-| NDCG@1 | — | — |
-| NDCG@5 | — | — |
-| NDCG@10 | — | — |
-| Recall@1 | — | — |
-| Recall@5 | — | — |
-| Recall@10 | — | — |
-| MRR | — | — |
-| Avg latency (ms) | — | — |
+Evaluated on NFCorpus test set (323 queries with qrels). FAISS retrieves top-20 candidates; reranker selects top-4 for generation.
+
+| Metric | FAISS only | FAISS + Rerank | Delta |
+|--------|-----------|----------------|-------|
+| NDCG@1 | 0.3395 | 0.4169 | +22.8% |
+| NDCG@5 | 0.2623 | 0.3294 | +25.6% |
+| NDCG@10 | 0.2435 | 0.2896 | +18.9% |
+| Recall@1 | 0.0396 | 0.0484 | +22.2% |
+| Recall@5 | 0.0823 | 0.1059 | +28.7% |
+| Recall@10 | 0.1104 | 0.1245 | +12.8% |
+| MRR | 0.4267 | 0.5035 | +18.0% |
+| Avg latency (ms/query) | 29.2 | 338.6 | +11.6x |
 
 ## References
 

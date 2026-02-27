@@ -18,7 +18,8 @@ QUERIES_PATH = Path("data/queries.jsonl")
 QRELS_PATH = Path("data/qrels_test.jsonl")
 INDEX_PATH = Path("vector_base/index.faiss")
 DOCSTORE_PATH = Path("vector_base/docstore.jsonl")
-OUT_PATH = Path("result/eval_retrieval.json")
+OUT_PATH  = Path("result/eval_retrieval.json")
+PLOT_PATH = Path("result/eval_retrieval.png")
 
 TOP_K = 20       # number of candidates retrieved from FAISS
 RERANK_BS = 16   # reranker batch size
@@ -174,6 +175,114 @@ def mean(values: list) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
+# ===== visualization =====
+
+def plot_results(result: dict, out_path: Path) -> None:
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+    except ImportError:
+        print("  matplotlib not installed, skipping plot")
+        return
+
+    faiss_r  = result["faiss"]
+    rerank_r = result["faiss_rerank"]
+
+    METRICS = [
+        ("ndcg@1",    "NDCG@1"),
+        ("ndcg@5",    "NDCG@5"),
+        ("ndcg@10",   "NDCG@10"),
+        ("recall@1",  "Recall@1"),
+        ("recall@5",  "Recall@5"),
+        ("recall@10", "Recall@10"),
+        ("mrr",       "MRR"),
+    ]
+    keys   = [m[0] for m in METRICS]
+    labels = [m[1] for m in METRICS]
+    v_f = [faiss_r[k]  for k in keys]
+    v_r = [rerank_r[k] for k in keys]
+
+    C_F = "#4C72B0"
+    C_R = "#C44E52"
+    BG  = "#F8F8F8"
+
+    fig = plt.figure(figsize=(14, 5.5))
+    fig.patch.set_facecolor(BG)
+    gs = fig.add_gridspec(1, 2, width_ratios=[4, 1], wspace=0.06)
+    ax  = fig.add_subplot(gs[0])
+    ax2 = fig.add_subplot(gs[1])
+
+    for a in (ax, ax2):
+        a.set_facecolor(BG)
+        a.spines[["top", "right"]].set_visible(False)
+        a.spines[["left", "bottom"]].set_color("#CCCCCC")
+        a.tick_params(colors="#555555")
+
+    # --- grouped bar chart ---
+    x = np.arange(len(labels))
+    w = 0.36
+    b1 = ax.bar(x - w / 2, v_f, w, color=C_F, alpha=0.88, label="FAISS only",    zorder=3)
+    b2 = ax.bar(x + w / 2, v_r, w, color=C_R, alpha=0.88, label="FAISS + Rerank", zorder=3)
+
+    for bar, val in zip(b1, v_f):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.004,
+                f"{val:.3f}", ha="center", va="bottom", fontsize=7, color=C_F)
+
+    for bar, val, fv in zip(b2, v_r, v_f):
+        pct = (val - fv) / fv * 100
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.004,
+                f"{val:.3f}\n+{pct:.1f}%", ha="center", va="bottom",
+                fontsize=7, color=C_R, fontweight="bold")
+
+    # group dividers
+    for xp in (2.5, 5.5):
+        ax.axvline(xp, color="#DDDDDD", linewidth=1, linestyle="--", zorder=1)
+
+    top = max(v_r) * 1.38
+    for xc, grp in ((1, "NDCG"), (4, "Recall"), (6, "MRR")):
+        ax.text(xc, top * 0.97, grp, ha="center", fontsize=9, color="#AAAAAA", style="italic")
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=10)
+    ax.set_ylabel("Score", fontsize=11, color="#555555")
+    ax.set_ylim(0, top)
+    ax.grid(axis="y", alpha=0.35, linestyle="--", zorder=0)
+    ax.legend(fontsize=10, framealpha=0.5, loc="upper left")
+    ax.set_title("Retrieval Quality — NFCorpus Test Set",
+                 fontsize=12, fontweight="bold", pad=12, color="#333333")
+
+    # --- latency ---
+    lat = [faiss_r["avg_latency_ms"], rerank_r["avg_latency_ms"]]
+    bars = ax2.bar(["FAISS\nonly", "FAISS+\nRerank"], lat,
+                   color=[C_F, C_R], alpha=0.88, width=0.5, zorder=3)
+    for bar, val in zip(bars, lat):
+        ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 6,
+                 f"{val:.0f} ms", ha="center", va="bottom",
+                 fontsize=9, fontweight="bold", color="#444444")
+
+    ax2.text(0.5, 0.97, f"×{lat[1]/lat[0]:.1f} slower",
+             transform=ax2.transAxes, ha="center", va="top",
+             fontsize=9, color="#999999", style="italic")
+    ax2.set_ylim(0, max(lat) * 1.3)
+    ax2.set_ylabel("ms / query", fontsize=10, color="#555555")
+    ax2.set_title("Latency", fontsize=12, fontweight="bold", pad=12, color="#333333")
+    ax2.grid(axis="y", alpha=0.35, linestyle="--", zorder=0)
+
+    fig.text(
+        0.5, 0.01,
+        f"bge-m3 + FAISS  vs  bge-m3 + FAISS + bge-reranker-v2-m3"
+        f"  ·  {result['num_queries']} queries  ·  top-{result['top_k_retrieval']} candidates",
+        ha="center", fontsize=8.5, color="#AAAAAA",
+    )
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(out_path, dpi=150, bbox_inches="tight", facecolor=BG)
+    print(f"  visualization saved to {out_path}")
+    plt.close()
+
+
 # ===== main =====
 
 def main():
@@ -289,6 +398,8 @@ def main():
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(json.dumps(result, indent=2, ensure_ascii=False))
     print(f"\n  results saved to {OUT_PATH}")
+
+    plot_results(result, PLOT_PATH)
 
 
 if __name__ == "__main__":
