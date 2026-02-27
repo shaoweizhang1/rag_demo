@@ -6,6 +6,8 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
+from utils import read_jsonl
+
 
 # ===== config =====
 MODEL_DIR    = "models/Qwen2.5_3B_Instruct"
@@ -16,16 +18,6 @@ MAX_TOKENS  = 256
 TEMPERATURE = 0.2
 TOP_P       = 0.9
 BATCH       = 64
-
-
-# ===== I/O helpers =====
-
-def read_jsonl(path: Path):
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                yield json.loads(line)
 
 
 # ===== main =====

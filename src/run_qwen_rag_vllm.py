@@ -4,10 +4,11 @@ import time
 from pathlib import Path
 
 import faiss
-import torch
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
 from vllm import LLM, SamplingParams
+
+from utils import build_context, device, embed_query, load_docstore, read_jsonl
 
 
 # ===== config =====
@@ -27,74 +28,6 @@ MAX_TOKENS  = 256
 TEMPERATURE = 0.2
 TOP_P       = 0.9
 BATCH       = 32
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-
-
-# ===== I/O helpers =====
-
-def read_jsonl(path: Path):
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                yield json.loads(line)
-
-
-def load_docstore(path: Path) -> list:
-    rows = []
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
-    return rows
-
-
-# ===== embedding =====
-
-def mean_pooling(last_hidden, attention_mask):
-    mask   = attention_mask.unsqueeze(-1).float()
-    summed = (last_hidden * mask).sum(dim=1)
-    counts = mask.sum(dim=1).clamp(min=1e-9)
-    return summed / counts
-
-
-@torch.inference_mode()
-def embed_query(model, tokenizer, query: str):
-    enc = tokenizer(
-        [query],
-        padding=True,
-        truncation=True,
-        max_length=512,
-        return_tensors="pt",
-    ).to(device)
-    out = model(**enc)
-    emb = mean_pooling(out.last_hidden_state, enc["attention_mask"])
-    emb = torch.nn.functional.normalize(emb, p=2, dim=1)
-    return emb.detach().cpu().numpy()
-
-
-# ===== context builder =====
-
-def build_context(docstore: list, hit_indices: list, ctx_k: int = 4):
-    ctx_parts = []
-    ctx_ids   = []
-    for idx in hit_indices[:ctx_k]:
-        if idx < 0:
-            continue
-        row  = docstore[idx]
-        cid  = row.get("_id", str(idx))
-        text = (row.get("text") or "").strip()
-        if not text:
-            continue
-        ctx_ids.append(cid)
-        ctx_parts.append(f"[{cid}]\n{text}")
-
-    ctx = "\n\n---\n\n".join(ctx_parts)
-    if len(ctx) > MAX_CTX_CHARS:
-        ctx = ctx[:MAX_CTX_CHARS]
-    return ctx_ids, ctx
 
 
 # ===== main =====
@@ -142,7 +75,7 @@ def main() -> None:
                 hit_indices = idxs[0].tolist()
 
                 # ---- build context from top-CTX_K FAISS results directly ----
-                ctx_ids, ctx = build_context(docstore, hit_indices, ctx_k=CTX_K)
+                ctx_ids, ctx = build_context(docstore, hit_indices, ctx_k=CTX_K, max_chars=MAX_CTX_CHARS)
                 messages = [
                     {
                         "role":    "system",
