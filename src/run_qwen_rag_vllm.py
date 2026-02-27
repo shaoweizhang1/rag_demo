@@ -99,12 +99,13 @@ def main() -> None:
                 out_f.write(
                     json.dumps(
                         {
-                            "qid":        meta["qid"],
-                            "query":      meta["query"],
-                            "answer":     out.outputs[0].text.strip(),
-                            "ctx_ids":    meta["ctx_ids"],
-                            "ctx":        meta["ctx"],
-                            "latency_ms": round(meta["retr_ms"] + gen_ms_per, 2),
+                            "qid":           meta["qid"],
+                            "query":         meta["query"],
+                            "answer":        out.outputs[0].text.strip(),
+                            "ctx_ids":       meta["ctx_ids"],
+                            "ctx":           meta["ctx"],
+                            "output_tokens": len(out.outputs[0].token_ids),
+                            "latency_ms":    round(meta["retr_ms"] + gen_ms_per, 2),
                         },
                         ensure_ascii=False,
                     ) + "\n"

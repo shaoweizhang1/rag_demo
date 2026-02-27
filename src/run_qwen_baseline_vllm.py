@@ -65,10 +65,11 @@ def main() -> None:
                 out_f.write(
                     json.dumps(
                         {
-                            "qid":        qid,
-                            "query":      query,
-                            "answer":     o.outputs[0].text.strip(),
-                            "latency_ms": round(gen_ms_per, 2),
+                            "qid":           qid,
+                            "query":         query,
+                            "answer":        o.outputs[0].text.strip(),
+                            "output_tokens": len(o.outputs[0].token_ids),
+                            "latency_ms":    round(gen_ms_per, 2),
                         },
                         ensure_ascii=False,
                     ) + "\n"
