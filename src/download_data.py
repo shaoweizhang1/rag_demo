@@ -1,21 +1,36 @@
 import json
-from datasets import load_dataset
 from pathlib import Path
 
-out = Path("data")
-out.mkdir(exist_ok=True)
+from datasets import load_dataset
 
-corpus = load_dataset("BeIR/nfcorpus","corpus",split="corpus")
-queries = load_dataset("BeIR/nfcorpus","queries",split="queries")
-test = load_dataset("BeIR/nfcorpus-qrels",split="test")
 
-def save_jsonl(ds, path):
+# ===== config =====
+OUT_DIR = Path("data")
+
+
+# ===== helpers =====
+
+def save_jsonl(ds, path: Path) -> None:
     with open(path, "w", encoding="utf-8") as f:
         for x in ds:
             f.write(json.dumps(x, ensure_ascii=False) + "\n")
 
-save_jsonl(corpus, out / "corpus.jsonl")
-save_jsonl(queries, out / "queries.jsonl")
-save_jsonl(test, out / "qrels_test.jsonl")
 
-print("done")
+# ===== main =====
+
+def main() -> None:
+    OUT_DIR.mkdir(exist_ok=True)
+
+    corpus  = load_dataset("BeIR/nfcorpus", "corpus", split="corpus")
+    queries = load_dataset("BeIR/nfcorpus", "queries", split="queries")
+    qrels   = load_dataset("BeIR/nfcorpus-qrels", split="test")
+
+    save_jsonl(corpus,  OUT_DIR / "corpus.jsonl")
+    save_jsonl(queries, OUT_DIR / "queries.jsonl")
+    save_jsonl(qrels,   OUT_DIR / "qrels_test.jsonl")
+
+    print("saved to", OUT_DIR.resolve())
+
+
+if __name__ == "__main__":
+    main()
