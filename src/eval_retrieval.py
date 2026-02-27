@@ -1,6 +1,5 @@
 import json
 import math
-import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -18,8 +17,10 @@ QUERIES_PATH = Path("data/queries.jsonl")
 QRELS_PATH = Path("data/qrels_test.jsonl")
 INDEX_PATH = Path("vector_base/index.faiss")
 DOCSTORE_PATH = Path("vector_base/docstore.jsonl")
-OUT_PATH  = Path("result/eval_retrieval.json")
-PLOT_PATH = Path("result/eval_retrieval.png")
+OUT_PATH       = Path("result/eval_retrieval.json")
+PLOT_PATH      = Path("result/eval_retrieval.png")
+RAG_PATH       = Path("result/qwen2.5_rag.jsonl")
+RAG_RERANK_PATH = Path("result/qwen2.5_rag_rerank.jsonl")
 
 TOP_K = 20       # number of candidates retrieved from FAISS
 RERANK_BS = 16   # reranker batch size
@@ -67,6 +68,15 @@ def load_queries(path: Path) -> list:
         if qid and text:
             rows.append({"qid": qid, "text": text})
     return rows
+
+
+def avg_latency_from_jsonl(path: Path) -> float:
+    """Read latency_ms fields from a result JSONL and return the mean."""
+    values = []
+    for row in read_jsonl(path):
+        if "latency_ms" in row:
+            values.append(row["latency_ms"])
+    return sum(values) / len(values) if values else 0.0
 
 
 def load_docstore(path: Path) -> list:
@@ -254,7 +264,7 @@ def plot_results(result: dict, out_path: Path) -> None:
                  fontsize=12, fontweight="bold", pad=12, color="#333333")
 
     # --- latency ---
-    lat = [faiss_r["avg_latency_ms"], rerank_r["avg_latency_ms"]]
+    lat = [faiss_r.get("avg_latency_ms", 0), rerank_r.get("avg_latency_ms", 0)]
     bars = ax2.bar(["RAG", "RAG+\nRerank"], lat,
                    color=[C_F, C_R], alpha=0.88, width=0.5, zorder=3)
     for bar, val in zip(bars, lat):
@@ -310,12 +320,10 @@ def main():
     faiss_ndcg   = {k: [] for k in K_VALUES}
     faiss_recall = {k: [] for k in K_VALUES}
     faiss_mrr    = []
-    faiss_lat    = []
 
     rerank_ndcg   = {k: [] for k in K_VALUES}
     rerank_recall = {k: [] for k in K_VALUES}
     rerank_mrr    = []
-    rerank_lat    = []
 
     for q in tqdm(queries, desc="evaluating"):
         qid   = q["qid"]
@@ -323,12 +331,8 @@ def main():
         qrel  = qrels_all[qid]
 
         # ---- FAISS retrieval ----
-        t0 = time.perf_counter()
         qvec = embed_query(emb_model, emb_tok, query)
         _, idxs = index.search(qvec, TOP_K)
-        faiss_ms = (time.perf_counter() - t0) * 1000
-        faiss_lat.append(faiss_ms)
-
         hit_indices = idxs[0].tolist()
         faiss_ranking = chunks_to_doc_ranking(hit_indices, docstore)
 
@@ -338,7 +342,6 @@ def main():
         faiss_mrr.append(mean_reciprocal_rank(faiss_ranking, qrel))
 
         # ---- reranker ----
-        t1 = time.perf_counter()
         cand_texts = [
             (docstore[i].get("text") or "").strip() if i >= 0 else ""
             for i in hit_indices
@@ -346,15 +349,16 @@ def main():
         scores = rerank_scores(rerank_model, rerank_tok, query, cand_texts, RERANK_BS)
         order = sorted(range(len(scores)), key=lambda j: scores[j], reverse=True)
         reranked_indices = [hit_indices[j] for j in order if hit_indices[j] >= 0]
-        rerank_ms = (time.perf_counter() - t1) * 1000
-        rerank_lat.append(faiss_ms + rerank_ms)
-
         reranked_ranking = chunks_to_doc_ranking(reranked_indices, docstore)
 
         for k in K_VALUES:
             rerank_ndcg[k].append(ndcg_at_k(reranked_ranking, qrel, k))
             rerank_recall[k].append(recall_at_k(reranked_ranking, qrel, k))
         rerank_mrr.append(mean_reciprocal_rank(reranked_ranking, qrel))
+
+    # ---- read latency from inference output files ----
+    rag_lat    = avg_latency_from_jsonl(RAG_PATH)       if RAG_PATH.exists()        else 0.0
+    rerank_lat = avg_latency_from_jsonl(RAG_RERANK_PATH) if RAG_RERANK_PATH.exists() else 0.0
 
     # ===== print table =====
     print("\n" + "=" * 56)
@@ -375,8 +379,8 @@ def main():
     print(f"  {'MRR':<22} {fm:>12.4f} {rm:>14.4f}")
     print("=" * 56)
     print(f"\n  Latency (avg per query)")
-    print(f"    RAG         :  {mean(faiss_lat):6.1f} ms")
-    print(f"    RAG+Rerank  :  {mean(rerank_lat):6.1f} ms")
+    print(f"    RAG         :  {rag_lat:6.1f} ms")
+    print(f"    RAG+Rerank  :  {rerank_lat:6.1f} ms")
 
     # ===== save =====
     result = {
@@ -386,13 +390,13 @@ def main():
             **{f"ndcg@{k}": mean(faiss_ndcg[k]) for k in K_VALUES},
             **{f"recall@{k}": mean(faiss_recall[k]) for k in K_VALUES},
             "mrr": fm,
-            "avg_latency_ms": mean(faiss_lat),
+            "avg_latency_ms": rag_lat,
         },
         "rag_rerank": {
             **{f"ndcg@{k}": mean(rerank_ndcg[k]) for k in K_VALUES},
             **{f"recall@{k}": mean(rerank_recall[k]) for k in K_VALUES},
             "mrr": rm,
-            "avg_latency_ms": mean(rerank_lat),
+            "avg_latency_ms": rerank_lat,
         },
     }
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)

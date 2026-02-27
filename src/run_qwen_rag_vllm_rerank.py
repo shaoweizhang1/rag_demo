@@ -1,5 +1,6 @@
 import json
 import math
+import time
 from pathlib import Path
 
 import faiss
@@ -163,6 +164,7 @@ def main() -> None:
                     continue
 
                 # ---- retrieve ----
+                t0 = time.perf_counter()
                 qvec = embed_query(emb_model, emb_tok, query)
                 _, idxs = index.search(qvec, TOP_K)
                 hit_indices = idxs[0].tolist()
@@ -174,6 +176,7 @@ def main() -> None:
                 ]
                 order, _ = rerank(rerank_model, rerank_tok, query, cand_texts, RERANK_BS)
                 reranked  = [hit_indices[j] for j in order if hit_indices[j] >= 0][:CTX_K]
+                retr_rerank_ms = (time.perf_counter() - t0) * 1000
 
                 # ---- build context + prompt ----
                 ctx_ids, ctx = build_context(docstore, reranked, ctx_k=CTX_K)
@@ -187,20 +190,25 @@ def main() -> None:
                 prompts.append(
                     qwen_tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
                 )
-                metas.append({"qid": qid, "query": query, "ctx_ids": ctx_ids, "ctx": ctx})
+                metas.append({"qid": qid, "query": query, "ctx_ids": ctx_ids, "ctx": ctx, "retr_rerank_ms": retr_rerank_ms})
 
             if not prompts:
                 continue
 
-            for meta, out in zip(metas, llm.generate(prompts, sp, use_tqdm=False)):
+            t1 = time.perf_counter()
+            outputs = llm.generate(prompts, sp, use_tqdm=False)
+            gen_ms_per = (time.perf_counter() - t1) * 1000 / len(prompts)
+
+            for meta, out in zip(metas, outputs):
                 out_f.write(
                     json.dumps(
                         {
-                            "qid":     meta["qid"],
-                            "query":   meta["query"],
-                            "answer":  out.outputs[0].text.strip(),
-                            "ctx_ids": meta["ctx_ids"],
-                            "ctx":     meta["ctx"],
+                            "qid":        meta["qid"],
+                            "query":      meta["query"],
+                            "answer":     out.outputs[0].text.strip(),
+                            "ctx_ids":    meta["ctx_ids"],
+                            "ctx":        meta["ctx"],
+                            "latency_ms": round(meta["retr_rerank_ms"] + gen_ms_per, 2),
                         },
                         ensure_ascii=False,
                     ) + "\n"

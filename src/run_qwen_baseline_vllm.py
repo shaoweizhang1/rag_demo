@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 
 from tqdm import tqdm
@@ -64,10 +65,19 @@ def main() -> None:
                     tok.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
                 )
 
-            for qid, query, o in zip(qids, queries, llm.generate(prompts, sp, use_tqdm=False)):
+            t0 = time.perf_counter()
+            outputs = llm.generate(prompts, sp, use_tqdm=False)
+            gen_ms_per = (time.perf_counter() - t0) * 1000 / max(len(prompts), 1)
+
+            for qid, query, o in zip(qids, queries, outputs):
                 out_f.write(
                     json.dumps(
-                        {"qid": qid, "query": query, "answer": o.outputs[0].text.strip()},
+                        {
+                            "qid":        qid,
+                            "query":      query,
+                            "answer":     o.outputs[0].text.strip(),
+                            "latency_ms": round(gen_ms_per, 2),
+                        },
                         ensure_ascii=False,
                     ) + "\n"
                 )
