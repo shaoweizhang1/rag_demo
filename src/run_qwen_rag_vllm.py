@@ -5,24 +5,22 @@ from pathlib import Path
 import faiss
 import torch
 from tqdm import tqdm
-from transformers import AutoModel, AutoModelForSequenceClassification, AutoTokenizer
+from transformers import AutoModel, AutoTokenizer
 from vllm import LLM, SamplingParams
 
 
 # ===== config =====
 QWEN_DIR    = "models/Qwen2.5_3B_Instruct"
 EMB_DIR     = "models/bge_m3"
-RERANK_DIR  = "models/bge_reranker_v2_m3"
 
 QUERIES_PATH  = Path("data/queries.jsonl")
 INDEX_PATH    = Path("vector_base/index.faiss")
 DOCSTORE_PATH = Path("vector_base/docstore.jsonl")
-OUT_PATH      = Path("result/qwen2.5_rag_rerank.jsonl")
+OUT_PATH      = Path("result/qwen2.5_rag.jsonl")
 
-TOP_K        = 20
-CTX_K        = 4
+TOP_K         = 20
+CTX_K         = 4
 MAX_CTX_CHARS = 8000
-RERANK_BS    = 16
 
 MAX_TOKENS  = 256
 TEMPERATURE = 0.2
@@ -76,28 +74,6 @@ def embed_query(model, tokenizer, query: str):
     return emb.detach().cpu().numpy()
 
 
-# ===== reranker =====
-
-@torch.inference_mode()
-def rerank(model, tokenizer, query: str, candidates: list, batch_size: int):
-    scores = []
-    for i in range(0, len(candidates), batch_size):
-        batch = candidates[i : i + batch_size]
-        enc   = tokenizer(
-            [query] * len(batch),
-            batch,
-            padding=True,
-            truncation=True,
-            max_length=512,
-            return_tensors="pt",
-        ).to(device)
-        logits = model(**enc).logits.squeeze(-1)
-        scores.extend(logits.detach().cpu().tolist())
-
-    order = sorted(range(len(candidates)), key=lambda j: scores[j], reverse=True)
-    return order, scores
-
-
 # ===== context builder =====
 
 def build_context(docstore: list, hit_indices: list, ctx_k: int = 4):
@@ -131,11 +107,6 @@ def main() -> None:
     emb_tok   = AutoTokenizer.from_pretrained(EMB_DIR, trust_remote_code=True)
     emb_model = AutoModel.from_pretrained(EMB_DIR, trust_remote_code=True).to(device).eval()
 
-    rerank_tok   = AutoTokenizer.from_pretrained(RERANK_DIR, trust_remote_code=True)
-    rerank_model = AutoModelForSequenceClassification.from_pretrained(
-        RERANK_DIR, trust_remote_code=True
-    ).to(device).eval()
-
     qwen_tok = AutoTokenizer.from_pretrained(QWEN_DIR, trust_remote_code=True)
     llm      = LLM(
         model=QWEN_DIR,
@@ -146,11 +117,11 @@ def main() -> None:
     )
     sp = SamplingParams(max_tokens=MAX_TOKENS, temperature=TEMPERATURE, top_p=TOP_P)
 
-    rows         = list(read_jsonl(QUERIES_PATH))
+    rows          = list(read_jsonl(QUERIES_PATH))
     total_batches = math.ceil(len(rows) / BATCH)
 
     with OUT_PATH.open("w", encoding="utf-8") as out_f:
-        for bi in tqdm(range(total_batches), desc="rag+rerank"):
+        for bi in tqdm(range(total_batches), desc="rag (no rerank)"):
             batch_rows = rows[bi * BATCH : (bi + 1) * BATCH]
 
             prompts = []
@@ -167,16 +138,8 @@ def main() -> None:
                 _, idxs = index.search(qvec, TOP_K)
                 hit_indices = idxs[0].tolist()
 
-                # ---- rerank ----
-                cand_texts = [
-                    (docstore[i].get("text") or "").strip() if i >= 0 else ""
-                    for i in hit_indices
-                ]
-                order, _ = rerank(rerank_model, rerank_tok, query, cand_texts, RERANK_BS)
-                reranked  = [hit_indices[j] for j in order if hit_indices[j] >= 0][:CTX_K]
-
-                # ---- build context + prompt ----
-                ctx_ids, ctx = build_context(docstore, reranked, ctx_k=CTX_K)
+                # ---- build context from top-CTX_K FAISS results directly ----
+                ctx_ids, ctx = build_context(docstore, hit_indices, ctx_k=CTX_K)
                 messages = [
                     {
                         "role":    "system",

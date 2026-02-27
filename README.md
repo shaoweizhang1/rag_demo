@@ -32,14 +32,16 @@ rag_demo/
 │   └── meta.json
 ├── result/                      # Model outputs (generated)
 │   ├── qwen2.5.jsonl            # Baseline answers
-│   ├── qwen2.5_rag.jsonl        # RAG + rerank answers (with ctx_ids)
+│   ├── qwen2.5_rag.jsonl        # RAG answers (no rerank, with ctx_ids)
+│   ├── qwen2.5_rag_rerank.jsonl # RAG + rerank answers (with ctx_ids)
 │   └── eval_retrieval.json      # Retrieval evaluation results
 ├── src/
 │   ├── download_data.py         # Step 1: download NFCorpus
 │   ├── download_models.py       # Step 2: download models from HuggingFace
 │   ├── build_faiss.py           # Step 3: chunk corpus, embed, build FAISS index
 │   ├── run_qwen_baseline_vllm.py        # Step 4a: baseline inference (no retrieval)
-│   ├── run_qwen_rag_vllm_rerank.py      # Step 4b: RAG + rerank inference
+│   ├── run_qwen_rag_vllm.py             # Step 4b: RAG inference (no rerank)
+│   ├── run_qwen_rag_vllm_rerank.py      # Step 4c: RAG + rerank inference
 │   └── eval_retrieval.py        # Step 5: retrieval evaluation
 ├── requirements.txt
 └── README.md
@@ -90,13 +92,21 @@ python src/run_qwen_baseline_vllm.py
 
 Runs Qwen2.5-3B-Instruct on all queries without retrieval. Output: `result/qwen2.5.jsonl`.
 
-### Step 4b — RAG + rerank inference
+### Step 4b — RAG inference (no rerank)
+
+```bash
+python src/run_qwen_rag_vllm.py
+```
+
+Embed query → FAISS top-20 → take top-4 directly → build context → Qwen generate. Output: `result/qwen2.5_rag.jsonl`.
+
+### Step 4c — RAG + rerank inference
 
 ```bash
 python src/run_qwen_rag_vllm_rerank.py
 ```
 
-Full pipeline: embed query → FAISS top-20 → bge-reranker top-4 → build context → Qwen generate. Output: `result/qwen2.5_rag.jsonl` (includes `ctx_ids` and `ctx` fields).
+Embed query → FAISS top-20 → bge-reranker top-4 → build context → Qwen generate. Output: `result/qwen2.5_rag_rerank.jsonl`.
 
 ### Step 5 — Retrieval evaluation
 
@@ -114,6 +124,7 @@ Computes NDCG@1/5/10, Recall@1/5/10, and MRR against NFCorpus qrels. Reports sco
 - [x] Model download — bge-m3, bge-reranker-v2-m3, Qwen2.5-3B-Instruct
 - [x] Indexing — token-level chunking, bge-m3 embedding, FAISS IndexFlatIP
 - [x] Baseline inference — Qwen2.5-3B direct generation via vLLM
+- [x] RAG inference — FAISS retrieval + Qwen2.5-3B via vLLM (no rerank)
 - [x] RAG + rerank inference — FAISS retrieval + bge-reranker + Qwen2.5-3B via vLLM
 - [x] Retrieval evaluation — NDCG/Recall/MRR for FAISS-only vs FAISS+rerank
 
