@@ -139,7 +139,7 @@ Computes NDCG@1/5/10, Recall@1/5/10, and MRR against NFCorpus qrels. Reports sco
 
 Evaluated on NFCorpus test set (323 queries with qrels). FAISS retrieves top-20 candidates; reranker selects top-4 for generation.
 
-Evaluated on NFCorpus test set (323 queries with qrels). FAISS retrieves top-20 candidates; reranker selects top-4 for generation.
+![Retrieval Evaluation](result/eval_retrieval.png)
 
 | Metric | FAISS only | FAISS + Rerank | Delta |
 |--------|-----------|----------------|-------|
