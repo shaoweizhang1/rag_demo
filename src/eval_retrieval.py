@@ -187,8 +187,8 @@ def plot_results(result: dict, out_path: Path) -> None:
         print("  matplotlib not installed, skipping plot")
         return
 
-    faiss_r  = result["faiss"]
-    rerank_r = result["faiss_rerank"]
+    faiss_r  = result["rag"]
+    rerank_r = result["rag_rerank"]
 
     METRICS = [
         ("ndcg@1",    "NDCG@1"),
@@ -223,8 +223,8 @@ def plot_results(result: dict, out_path: Path) -> None:
     # --- grouped bar chart ---
     x = np.arange(len(labels))
     w = 0.36
-    b1 = ax.bar(x - w / 2, v_f, w, color=C_F, alpha=0.88, label="FAISS only",    zorder=3)
-    b2 = ax.bar(x + w / 2, v_r, w, color=C_R, alpha=0.88, label="FAISS + Rerank", zorder=3)
+    b1 = ax.bar(x - w / 2, v_f, w, color=C_F, alpha=0.88, label="RAG",          zorder=3)
+    b2 = ax.bar(x + w / 2, v_r, w, color=C_R, alpha=0.88, label="RAG + Rerank", zorder=3)
 
     for bar, val in zip(b1, v_f):
         ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.004,
@@ -255,7 +255,7 @@ def plot_results(result: dict, out_path: Path) -> None:
 
     # --- latency ---
     lat = [faiss_r["avg_latency_ms"], rerank_r["avg_latency_ms"]]
-    bars = ax2.bar(["FAISS\nonly", "FAISS+\nRerank"], lat,
+    bars = ax2.bar(["RAG", "RAG+\nRerank"], lat,
                    color=[C_F, C_R], alpha=0.88, width=0.5, zorder=3)
     for bar, val in zip(bars, lat):
         ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 6,
@@ -358,7 +358,7 @@ def main():
 
     # ===== print table =====
     print("\n" + "=" * 56)
-    print(f"  {'Metric':<22} {'FAISS only':>12} {'FAISS+Rerank':>14}")
+    print(f"  {'Metric':<22} {'RAG':>12} {'RAG+Rerank':>14}")
     print("=" * 56)
     for k in K_VALUES:
         fn = mean(faiss_ndcg[k])
@@ -375,20 +375,20 @@ def main():
     print(f"  {'MRR':<22} {fm:>12.4f} {rm:>14.4f}")
     print("=" * 56)
     print(f"\n  Latency (avg per query)")
-    print(f"    FAISS only  :  {mean(faiss_lat):6.1f} ms")
-    print(f"    FAISS+Rerank:  {mean(rerank_lat):6.1f} ms")
+    print(f"    RAG         :  {mean(faiss_lat):6.1f} ms")
+    print(f"    RAG+Rerank  :  {mean(rerank_lat):6.1f} ms")
 
     # ===== save =====
     result = {
         "num_queries": len(queries),
         "top_k_retrieval": TOP_K,
-        "faiss": {
+        "rag": {
             **{f"ndcg@{k}": mean(faiss_ndcg[k]) for k in K_VALUES},
             **{f"recall@{k}": mean(faiss_recall[k]) for k in K_VALUES},
             "mrr": fm,
             "avg_latency_ms": mean(faiss_lat),
         },
-        "faiss_rerank": {
+        "rag_rerank": {
             **{f"ndcg@{k}": mean(rerank_ndcg[k]) for k in K_VALUES},
             **{f"recall@{k}": mean(rerank_recall[k]) for k in K_VALUES},
             "mrr": rm,
