@@ -1,6 +1,6 @@
 # rag_demo
 
-A end-to-end Retrieval-Augmented Generation (RAG) system built on [NFCorpus](https://www.cl.uni-heidelberg.de/statnlpgroup/nfcorpus/) (biomedical IR benchmark), designed to study the impact of retrieval and reranking on LLM answer quality.
+An end-to-end Retrieval-Augmented Generation (RAG) system built on [NFCorpus](https://www.cl.uni-heidelberg.de/statnlpgroup/nfcorpus/) (biomedical IR benchmark), designed to study the impact of retrieval and reranking on LLM answer quality.
 
 ## Overview
 
@@ -12,7 +12,7 @@ This project compares three configurations on the NFCorpus question-answering ta
 | RAG | bge-m3 + FAISS | — | Qwen2.5-3B-Instruct |
 | RAG + Rerank | bge-m3 + FAISS | bge-reranker-v2-m3 | Qwen2.5-3B-Instruct |
 
-Evaluation covers both **retrieval quality** (NDCG@10, Recall@10, MRR) and **answer grounding** (faithfulness of generated answers to retrieved context).
+Evaluation covers **retrieval quality** (NDCG, Recall, MRR) comparing FAISS-only vs FAISS+rerank retrieval against NFCorpus qrels. Generation evaluation is omitted as NFCorpus provides no reference answers.
 
 ## Repository Structure
 
@@ -32,15 +32,15 @@ rag_demo/
 │   └── meta.json
 ├── result/                      # Model outputs (generated)
 │   ├── qwen2.5.jsonl            # Baseline answers
-│   └── qwen2.5_rag.jsonl        # RAG + rerank answers (with ctx_ids)
+│   ├── qwen2.5_rag.jsonl        # RAG + rerank answers (with ctx_ids)
+│   └── eval_retrieval.json      # Retrieval evaluation results
 ├── src/
 │   ├── download_data.py         # Step 1: download NFCorpus
 │   ├── download_models.py       # Step 2: download models from HuggingFace
 │   ├── build_faiss.py           # Step 3: chunk corpus, embed, build FAISS index
 │   ├── run_qwen_baseline_vllm.py        # Step 4a: baseline inference (no retrieval)
 │   ├── run_qwen_rag_vllm_rerank.py      # Step 4b: RAG + rerank inference
-│   ├── eval_retrieval.py        # Step 5a: retrieval evaluation [TODO]
-│   └── eval_faithfulness.py     # Step 5b: answer grounding evaluation [TODO]
+│   └── eval_retrieval.py        # Step 5: retrieval evaluation
 ├── requirements.txt
 └── README.md
 ```
@@ -98,21 +98,13 @@ python src/run_qwen_rag_vllm_rerank.py
 
 Full pipeline: embed query → FAISS top-20 → bge-reranker top-4 → build context → Qwen generate. Output: `result/qwen2.5_rag.jsonl` (includes `ctx_ids` and `ctx` fields).
 
-### Step 5a — Retrieval evaluation
+### Step 5 — Retrieval evaluation
 
 ```bash
-python src/eval_retrieval.py   # [TODO]
+python src/eval_retrieval.py
 ```
 
-Computes NDCG@10, Recall@10, MRR against NFCorpus qrels. Reports scores for FAISS-only and FAISS+rerank retrieval.
-
-### Step 5b — Faithfulness evaluation
-
-```bash
-python src/eval_faithfulness.py   # [TODO]
-```
-
-Measures answer grounding: what fraction of answer content is supported by the retrieved context. Reports grounding rate for baseline vs RAG.
+Computes NDCG@1/5/10, Recall@1/5/10, and MRR against NFCorpus qrels. Reports scores and per-query latency for both FAISS-only and FAISS+rerank retrieval. Output: `result/eval_retrieval.json`.
 
 ## Development Plan
 
@@ -123,17 +115,7 @@ Measures answer grounding: what fraction of answer content is supported by the r
 - [x] Indexing — token-level chunking, bge-m3 embedding, FAISS IndexFlatIP
 - [x] Baseline inference — Qwen2.5-3B direct generation via vLLM
 - [x] RAG + rerank inference — FAISS retrieval + bge-reranker + Qwen2.5-3B via vLLM
-
-### In Progress
-
-- [ ] **Retrieval evaluation** (`eval_retrieval.py`)
-  - NDCG@10, Recall@10, MRR using NFCorpus qrels
-  - Compare FAISS-only vs FAISS + rerank
-  - Report retrieval latency per query
-
-- [ ] **Faithfulness evaluation** (`eval_faithfulness.py`)
-  - Token-level grounding rate: fraction of answer n-grams found in retrieved context
-  - Compare baseline (no context) vs RAG answers
+- [x] Retrieval evaluation — NDCG/Recall/MRR for FAISS-only vs FAISS+rerank
 
 ### Planned
 
@@ -151,19 +133,22 @@ Measures answer grounding: what fraction of answer content is supported by the r
 
 **vLLM batching**: Queries are batched (batch=32 for RAG, 64 for baseline) to maximize GPU utilization during generation.
 
+**No generation evaluation**: NFCorpus provides relevance judgments for retrieval but no reference answers, making reference-based metrics (ROUGE, BERTScore) inapplicable. Evaluation focuses on retrieval quality only.
+
 ## Results
 
-*To be updated after evaluation scripts are complete.*
+*To be updated after running eval_retrieval.py on the server.*
 
 | Metric | FAISS only | FAISS + Rerank |
 |--------|-----------|----------------|
+| NDCG@1 | — | — |
+| NDCG@5 | — | — |
 | NDCG@10 | — | — |
+| Recall@1 | — | — |
+| Recall@5 | — | — |
 | Recall@10 | — | — |
 | MRR | — | — |
-
-| Metric | Baseline | RAG + Rerank |
-|--------|----------|--------------|
-| Grounding rate | — | — |
+| Avg latency (ms) | — | — |
 
 ## References
 
